@@ -1,0 +1,34 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 4,
+      "Minor": 1,
+      "Patch": 0,
+      "Build": 1
+    },
+    "ProductVersion": {
+      "Major": 4,
+      "Minor": 1,
+      "Patch": 0,
+      "Build": 1
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "0",
+    "FileOS": "040004",
+    "FileType": "01",
+    "FileSubType": "0"
+  },
+  "StringFileInfo": {
+    "Comments": "sccv - 代码行数统计（基于 scc 4.1.0）",
+    "CompanyName": "sccv",
+    "FileDescription": "代码行数统计",
+    "FileVersion": "4.1.0.1",
+    "InternalName": "sccv",
+    "LegalCopyright": "MIT License; 基于 scc (Ben Boyter)",
+    "OriginalFilename": "代码行数统计.exe",
+    "ProductName": "代码行数统计",
+    "ProductVersion": "4.1.0.1"
+  },
+  "IconPath": "assets/icon.ico",
+  "ManifestPath": ""
+}

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- DEC-026/DEC-301：CSP 全 self、无内联脚本/样式；样式统一走 style.css -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:">
+  <title data-i18n="sccv 代码统计">sccv 代码统计</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- 顶栏：标题 + 版本占位 + 退出（K9：退出经 /api/shutdown 优雅关停） -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-brand">
+        <span class="topbar-title" data-i18n="sccv 代码统计">sccv 代码统计</span>
+        <span id="version-label" class="topbar-version">—</span>
+      </div>
+      <button id="btn-exit" type="button" class="btn btn-ghost btn-exit" data-i18n="退出">退出</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 扫描区：F5 目录输入交互（T-011 本体：对话框 / 手输 / localStorage 最近 10 条 + 清除历史） -->
+    <section id="scan-section" class="panel scan-panel" aria-busy="false">
+      <h2 class="panel-title" data-i18n="分析目标">分析目标</h2>
+      <div class="scan-row">
+        <button id="btn-browse" type="button" class="btn btn-ghost" data-i18n="浏览文件夹">浏览文件夹</button>
+        <input id="path-input" class="path-input" type="text" spellcheck="false" autocomplete="off"
+               placeholder="输入或粘贴文件夹路径，也可点击左侧按钮选择"
+               data-i18n-placeholder="输入或粘贴文件夹路径，也可点击左侧按钮选择"
+               aria-label="文件夹路径">
+        <button id="btn-analyze" type="button" class="btn btn-primary" data-i18n="开始分析">开始分析</button>
+      </div>
+      <div class="scan-options">
+        <label class="checkbox">
+          <input id="cb-include-unknown" type="checkbox">
+          <span data-i18n="包含未识别类型">包含未识别类型</span>
+        </label>
+      </div>
+      <p id="scan-status" class="status" role="status" aria-live="polite"></p>
+      <p id="scan-hint" class="status" role="alert" aria-live="polite"></p>
+
+      <!-- BG-004：页面生命周期轻提示（静态文案节点，data-i18n 双语；关闭标签页后
+           服务端 SSE 归零 15s 宽限且作业空闲即优雅退出，故约 30 秒内退出） -->
+      <p class="lifecycle-note" data-i18n="关闭此页面后，程序将在约 30 秒内自动退出；也可随时点击右上角退出">关闭此页面后，程序将在约 30 秒内自动退出；也可随时点击右上角退出</p>
+
+      <!-- OPT-001/002 两步向导（二批定稿：主"开始分析"按钮先弹向导第一步；
+           「直接分析（全部包含）」= 原直跑等价快捷；向导内选项全部可回退） -->
+      <div id="wizard" class="wizard" hidden>
+        <div class="wizard-head">
+          <h3 class="wizard-title" data-i18n="选择分析范围">选择分析范围</h3>
+          <div class="wizard-head-right">
+            <span id="wizard-step-label" class="wizard-step-label" data-i18n="第 1 步，共 2 步">第 1 步，共 2 步</span>
+            <button id="btn-wizard-close" type="button" class="link-btn" data-i18n="收起">收起</button>
+          </div>
+        </div>
+        <p id="wizard-tree-status" class="status" role="status" aria-live="polite"></p>
+
+        <!-- 第一步：目录树三态勾选（树体由 app.js 经 /api/tree 懒渲染） -->
+        <div id="wizard-tree-step">
+          <div class="wizard-chips-row">
+            <span class="wizard-chips-label" data-i18n="常用排除">常用排除</span>
+            <div id="wizard-chips" class="wizard-chips"></div>
+          </div>
+          <div id="wizard-tree" class="wizard-tree" role="tree" aria-label="目录树"></div>
+          <p id="wizard-excluded-note" class="wizard-note"></p>
+          <div class="wizard-actions">
+            <button id="btn-wizard-direct" type="button" class="btn btn-primary" data-i18n="直接分析（全部包含）">直接分析（全部包含）</button>
+            <div class="wizard-actions-end">
+              <button id="btn-wizard-reset" type="button" class="link-btn" data-i18n="重置">重置</button>
+              <button id="btn-wizard-next" type="button" class="btn btn-ghost" data-i18n="下一步">下一步</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第二步：文件类型双模式（清单由 app.js 经 /api/extensions 渲染） -->
+        <div id="wizard-ext-step" hidden>
+          <p id="wizard-ext-status" class="status" role="status" aria-live="polite"></p>
+          <div class="wizard-ext-modes">
+            <label class="checkbox">
+              <input type="radio" name="wizard-ext-mode" value="none" checked>
+              <span data-i18n="不限">不限</span>
+            </label>
+            <label class="checkbox">
+              <input type="radio" name="wizard-ext-mode" value="include">
+              <span data-i18n="仅分析勾选类型">仅分析勾选类型</span>
+            </label>
+            <label class="checkbox">
+              <input type="radio" name="wizard-ext-mode" value="exclude">
+              <span data-i18n="排除勾选类型">排除勾选类型</span>
+            </label>
+          </div>
+          <p class="wizard-note" data-i18n="重叠的扩展名以排除为准；无扩展名文件不参与类型筛选。">重叠的扩展名以排除为准；无扩展名文件不参与类型筛选。</p>
+          <div class="wizard-ext-toolbar">
+            <button id="btn-wizard-ext-all" type="button" class="link-btn" data-i18n="全选">全选</button>
+            <button id="btn-wizard-ext-invert" type="button" class="link-btn" data-i18n="反选">反选</button>
+            <span id="wizard-ext-note" class="wizard-note"></span>
+          </div>
+          <div id="wizard-ext-list" class="wizard-ext-list"></div>
+          <div class="wizard-actions">
+            <button id="btn-wizard-back" type="button" class="btn btn-ghost" data-i18n="上一步">上一步</button>
+            <button id="btn-wizard-analyze" type="button" class="btn btn-primary" data-i18n="开始分析">开始分析</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="history">
+        <div class="history-head">
+          <h3 class="history-title" data-i18n="最近分析">最近分析</h3>
+          <button id="btn-clear-history" type="button" class="link-btn" data-i18n="清除历史">清除历史</button>
+        </div>
+        <ul id="history-list" class="history-list"></ul>
+        <p id="history-empty" class="empty-state" data-i18n="暂无历史记录">暂无历史记录</p>
+      </div>
+    </section>
+
+    <!-- 结果区：分析完成后由 app.js 触发一次性编排浮现动效（.reveal） -->
+    <div id="results-area">
+      <!-- T-012 挂载点：F6 概览卡片渲染进 #overview-body（高密度网格样式 .card-grid/.card 已就绪） -->
+      <section id="overview-section" class="panel">
+        <h2 class="panel-title" data-i18n="概览">概览</h2>
+        <div id="overview-body" class="card-grid" data-state="empty">
+          <p class="empty-state" data-i18n="完成一次分析后，这里将呈现文件、代码行等总览指标。">完成一次分析后，这里将呈现文件、代码行等总览指标。</p>
+        </div>
+      </section>
+
+      <!-- T-012 挂载点：语言明细表渲染进 #language-body（表格基样式 .data-table 已就绪） -->
+      <section id="language-section" class="panel">
+        <h2 class="panel-title" data-i18n="语言明细">语言明细</h2>
+        <div id="language-body" data-state="empty">
+          <p class="empty-state" data-i18n="完成一次分析后，这里将按语言呈现行数与占比明细。">完成一次分析后，这里将按语言呈现行数与占比明细。</p>
+        </div>
+      </section>
+
+      <div class="split">
+        <!-- T-013 挂载点：F7 分布图（SVG 饼/环）渲染进 #charts-body -->
+        <section id="charts-section" class="panel">
+          <h2 class="panel-title" data-i18n="分布图">分布图</h2>
+          <div id="charts-body" data-state="empty">
+            <p class="empty-state" data-i18n="完成一次分析后，这里将呈现语言分布饼图与环形图。">完成一次分析后，这里将呈现语言分布饼图与环形图。</p>
+          </div>
+        </section>
+
+        <!-- T-014 挂载点：F8 文件下钻（排序/搜索/分页）渲染进 #files-body -->
+        <section id="files-section" class="panel">
+          <h2 class="panel-title" data-i18n="文件明细">文件明细</h2>
+          <div id="files-body" data-state="empty">
+            <p class="empty-state" data-i18n="完成一次分析后，这里将呈现可排序、可搜索的文件下钻表。">完成一次分析后，这里将呈现可排序、可搜索的文件下钻表。</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- T-301/OPT-003 挂载点：统计口径说明卡（原生 details/summary 可折叠，无 JS 参与开合）；
+           ①各语言统计规则（explain.js 经 /api/explain 渲染）②未计入统计的三类规则性说明 -->
+      <section id="explain-section" class="panel">
+        <details class="explain-details" id="explain-details">
+          <summary class="explain-summary" data-i18n="统计口径说明">统计口径说明</summary>
+          <div class="explain-body">
+            <h3 class="explain-subtitle" data-i18n="各语言统计规则">各语言统计规则</h3>
+            <div id="explain-rules-body" data-state="empty">
+              <p class="empty-state" data-i18n="完成一次分析后，这里将按语言展示注释符号等统计规则。">完成一次分析后，这里将按语言展示注释符号等统计规则。</p>
+            </div>
+            <h3 class="explain-subtitle" data-i18n="未计入统计的内容">未计入统计的内容</h3>
+            <div id="explain-excluded-body" data-state="empty">
+              <p class="empty-state" data-i18n="完成一次分析后，这里将说明哪些内容未计入统计。">完成一次分析后，这里将说明哪些内容未计入统计。</p>
+            </div>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <!-- 导出栏占位：按钮接通与快照状态联动归 T-012（后端 T-032/T-033）；DEC-012/DEC-101 全量口径副标签 -->
+    <section id="export-section" class="panel export-panel">
+      <div class="export-row">
+        <h2 class="panel-title" data-i18n="导出">导出</h2>
+        <div class="export-actions">
+          <button id="btn-export-html" type="button" class="btn btn-ghost" disabled data-i18n="HTML 报告">HTML 报告</button>
+          <button id="btn-export-json" type="button" class="btn btn-ghost" disabled>JSON</button>
+          <button id="btn-export-csv" type="button" class="btn btn-ghost" disabled>CSV</button>
+        </div>
+      </div>
+      <p class="export-note" data-i18n="导出当前分析范围内的全部数据（不含页面筛选）">导出当前分析范围内的全部数据（不含页面筛选）</p>
+      <!-- M-001/DEC-307：HTML 报告导出知情提示（可见小字注释行，文案源自 T-033 终裁；静态文案节点，无用户输入） -->
+      <p class="export-note export-privacy-note" data-i18n="导出的 HTML 报告标题可能包含由仓库 remote 地址派生的仓库名；勾选“包含 git 历史”时，报告将含提交作者（姓名/邮箱）等历史信息。报告仅在本机内存中生成，服务端不做任何持久化。">导出的 HTML 报告标题可能包含由仓库 remote 地址派生的仓库名；勾选“包含 git 历史”时，报告将含提交作者（姓名/邮箱）等历史信息。报告仅在本机内存中生成，服务端不做任何持久化。</p>
+      <!-- T-012：导出结果行内提示（stub 501 → "导出功能将在后续版本就绪"等） -->
+      <p id="export-status" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <script src="/static/i18n.js"></script>
+  <!-- OPT-001：向导目录树纯函数库（normalizeTree/collectExcluded；app.js 向导消费） -->
+  <script src="/static/lib/lib_tree.js"></script>
+  <script src="/static/app.js"></script>
+  <!-- T-012：统计纯函数库 + F6 统计视图（概览卡片/语言明细表/导出三按钮；依赖 app.js 的快照渲染接缝） -->
+  <script src="/static/lib/lib_stats.js"></script>
+  <script src="/static/stats.js"></script>
+  <!-- T-014：文件下钻纯函数库 + F8 明细表（排序/搜索/分页/语言筛选联动；桥接 T-012 快照接缝） -->
+  <script src="/static/lib/lib_files.js"></script>
+  <script src="/static/files.js"></script>
+  <!-- T-013：分布图纯函数库 + F7 语言分布图（SVG 饼/环切换；语言筛选广播源 sccv:filterchange；桥接 T-012 快照接缝） -->
+  <script src="/static/lib/lib_charts.js"></script>
+  <script src="/static/charts.js"></script>
+  <!-- T-301：口径说明纯函数库 + OPT-003 统计口径说明卡（/api/explain 取数渲染；桥接 T-012 快照接缝） -->
+  <script src="/static/lib/lib_explain.js"></script>
+  <script src="/static/explain.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+# 构建产物
+dist/
+*.exe
+*.test
+
+# 运行日志
+logs/
+*.log
+
+# 本地流水线/工具产物（不入库）
+.playwright/
+.work-log/
+.mimosa/
+.claudeignore
+
+# 前端依赖
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# 操作系统杂项
+Thumbs.db
+.DS_Store

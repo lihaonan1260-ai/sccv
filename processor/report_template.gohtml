@@ -1,0 +1,574 @@
+{{- define "headline" -}}
+{{ comma .Totals.Files }} {{T "个文件"}} · {{ comma .Totals.Code }} {{T "源代码行数"}}{{ if .ULOC }} · {{ commaInt .ULOC.Global }} {{T "唯一代码行数"}} ({{ pctFloat .ULOC.Dryness }} {{T "去重率"}}){{ end }}{{ if .Authors }} · bus factor {{ .Authors.BusFactor }}{{ end }}{{ if .Cocomo }} · {{T "预估成本"}} {{ .Cocomo.PrettyCost }}{{ end }}
+{{- end -}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{T "scc 报告"}} - {{ .RepoName }}</title>
+  <meta name="description" content="{{ template "headline" . }}">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{T "scc 已分析"}} {{ .RepoName }}">
+  <meta property="og:description" content="{{ template "headline" . }}">
+  {{- if .CardSVG }}
+  <meta property="og:image" content="{{ dataURLCard .CardSVG }}">
+  {{- end }}
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{T "scc 已分析"}} {{ .RepoName }}">
+  <meta name="twitter:description" content="{{ template "headline" . }}">
+  {{- if .CardSVG }}
+  <meta name="twitter:image" content="{{ dataURLCard .CardSVG }}">
+  {{- end }}
+
+  <!-- Theme: apply persisted preference BEFORE first paint to avoid a flash. -->
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('scc-theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root {
+      --bg: #ffffff; --bg-sunken: #fafafa; --fg: #1a1a1a; --fg-muted: #555555; --fg-dim: #888888;
+      --border: #e5e5e5; --border-strong: #cfcfcf; --link: #0b5ea8; --accent: #4a7daa; --accent-2: #2c7a7b;
+      --code-bg: #f5f5f3; --good: #0a7d4f; --warn: #b25400; --danger: #b3261e;
+      --code: #4a7daa; --blank: #cfcfcf; --comment: #93a6b8;
+      --hover-row: rgba(0,0,0,0.025);
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115; --bg-sunken: #161a20; --fg: #e8e6e3; --fg-muted: #a8aeb6; --fg-dim: #7a818a;
+        --border: #262b33; --border-strong: #3a4049; --link: #6cb6ff; --accent: #6b9fd0; --accent-2: #5cb8b8;
+        --code-bg: #181c22; --good: #4ec9a0; --warn: #e0a060; --danger: #f08a82;
+        --code: #6b9fd0; --blank: #3a4049; --comment: #5d7a96;
+        --hover-row: rgba(255,255,255,0.04);
+        color-scheme: dark;
+      }
+    }
+    html[data-theme="light"] {
+      --bg: #ffffff; --bg-sunken: #fafafa; --fg: #1a1a1a; --fg-muted: #555555; --fg-dim: #888888;
+      --border: #e5e5e5; --border-strong: #cfcfcf; --link: #0b5ea8; --accent: #4a7daa; --accent-2: #2c7a7b;
+      --code-bg: #f5f5f3; --good: #0a7d4f; --warn: #b25400; --danger: #b3261e;
+      --code: #4a7daa; --blank: #cfcfcf; --comment: #93a6b8;
+      --hover-row: rgba(0,0,0,0.025); color-scheme: light;
+    }
+    html[data-theme="dark"] {
+      --bg: #0f1115; --bg-sunken: #161a20; --fg: #e8e6e3; --fg-muted: #a8aeb6; --fg-dim: #7a818a;
+      --border: #262b33; --border-strong: #3a4049; --link: #6cb6ff; --accent: #6b9fd0; --accent-2: #5cb8b8;
+      --code-bg: #181c22; --good: #4ec9a0; --warn: #e0a060; --danger: #f08a82;
+      --code: #6b9fd0; --blank: #3a4049; --comment: #5d7a96;
+      --hover-row: rgba(255,255,255,0.04); color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif, system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap { max-width: 960px; margin: 0 auto; padding: 48px 32px 96px; }
+
+    /* ===== HERO ===== */
+    header.hero {
+      padding-bottom: 28px; margin-bottom: 56px;
+      border-bottom: 1px solid var(--border);
+    }
+    .crumb {
+      font: 500 12px ui-monospace, monospace;
+      color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+    h1.title {
+      font-size: 38px; line-height: 1.15; font-weight: 700; margin: 0 0 10px;
+      letter-spacing: -0.015em;
+    }
+    p.tagline { margin: 0; color: var(--fg-muted); font-size: 16px; max-width: 64ch; }
+    .actions {
+      margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .actions a, .actions button {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; font-size: 13px;
+      background: var(--bg); border: 1px solid var(--border-strong);
+      color: var(--fg); border-radius: 4px; text-decoration: none; cursor: pointer;
+      font-family: inherit; line-height: 1;
+    }
+    .actions a:hover, .actions button:hover { border-color: var(--fg-muted); background: var(--bg-sunken); text-decoration: none; }
+
+    /* ===== SECTION ===== */
+    section { margin: 0 0 64px; }
+    section h2 {
+      font-size: 24px; font-weight: 700; margin: 0 0 18px;
+      display: flex; align-items: baseline; gap: 14px;
+      letter-spacing: -0.01em;
+    }
+    section h2 .num {
+      font-family: ui-monospace, monospace; font-size: 14px;
+      color: var(--fg-dim); font-weight: 500;
+      letter-spacing: 0.08em;
+    }
+    section h2 .count { color: var(--fg-dim); font-size: 13px; font-weight: 400; letter-spacing: 0; }
+    section .lede { margin: 0 0 22px; color: var(--fg-muted); font-size: 14px; max-width: 70ch; }
+
+    .submodel {
+      font-size: 12px; font-weight: 600; margin: 28px 0 10px;
+      color: var(--fg); text-transform: uppercase; letter-spacing: 0.1em;
+    }
+    .submodel:first-of-type { margin-top: 4px; }
+    .submodel-meaning {
+      display: inline; color: var(--fg-dim); font-weight: 400;
+      text-transform: none; letter-spacing: 0; margin-left: 4px;
+      font-size: 13px;
+    }
+
+    /* ===== OVERVIEW METRICS ===== */
+    .metrics {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    }
+    .metric { padding: 14px 16px; border-right: 1px solid var(--border); }
+    .metric:last-child { border-right: none; }
+    .metric .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-dim); }
+    .metric .value { font-family: ui-monospace, monospace; font-size: 22px; font-weight: 600; margin-top: 4px; color: var(--fg); }
+    .metric .sub { font-size: 11px; color: var(--fg-dim); margin-top: 2px; }
+    @media (max-width: 820px) { .metrics { grid-template-columns: repeat(3, 1fr); } .metric:nth-child(3n) { border-right: none; } }
+    @media (max-width: 480px) { .metrics { grid-template-columns: repeat(2, 1fr); } .metric { border-right: 1px solid var(--border) !important; } .metric:nth-child(2n) { border-right: none !important; } }
+
+    /* ===== COMPOSITION BAR ===== */
+    .composition { margin-top: 28px; }
+    .composition .bar {
+      display: flex; width: 100%; height: 14px; border-radius: 2px; overflow: hidden;
+      background: var(--bg-sunken);
+    }
+    .composition .bar > span { display: block; height: 100%; }
+    .composition .legend {
+      margin-top: 10px; display: flex; gap: 22px; flex-wrap: wrap;
+      font-size: 13px; color: var(--fg-muted);
+    }
+    .composition .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 1px; vertical-align: middle; margin-right: 6px; }
+    .composition .legend strong { color: var(--fg); font-family: ui-monospace, monospace; font-weight: 600; margin-left: 4px; }
+
+    /* ===== TABLES ===== */
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--fg-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border-strong); }
+    td.num, th.num { text-align: right; font-family: ui-monospace, monospace; }
+    tbody tr:hover td { background: var(--hover-row); }
+    .ratio-cell { width: 120px; }
+    .ratio-cell .track {
+      display: block; width: 100%; height: 6px; background: var(--bg-sunken); border-radius: 1px; position: relative;
+    }
+    .ratio-cell .fill {
+      position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 1px;
+    }
+
+    /* ===== PILLS / TAGS ===== */
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag {
+      display: inline-flex; align-items: baseline; gap: 6px;
+      padding: 3px 9px; border: 1px solid var(--border-strong); border-radius: 3px;
+      font-size: 12.5px; color: var(--fg); background: var(--bg);
+      font-family: ui-monospace, monospace;
+    }
+    .tag.warn { border-color: rgba(178,84,0,0.35); color: var(--warn); }
+    .tag.danger { border-color: rgba(179,38,30,0.35); color: var(--danger); }
+    .tag.good { border-color: rgba(10,125,79,0.35); color: var(--good); }
+
+    /* ===== SPARKLINES ===== */
+    .spark { height: 22px; width: 140px; vertical-align: middle; display: inline-block; }
+    .spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+    .spark .fill { fill: var(--accent); opacity: 0.12; stroke: none; }
+
+    /* ===== HISTOGRAM ===== */
+    .histo { width: 100%; height: auto; display: block; }
+    .histo rect { fill: var(--accent); }
+    .histo .label { font: 10px ui-monospace, monospace; fill: var(--fg-dim); }
+    .histo .value { font: 10px ui-monospace, monospace; fill: var(--fg); }
+    .histo .axis { stroke: var(--border); }
+
+    /* ===== FILES ===== */
+    details.files { margin-top: 10px; }
+    details.files > summary {
+      list-style: none; cursor: pointer; font-size: 13px; color: var(--link);
+      padding: 6px 0;
+    }
+    details.files > summary::-webkit-details-marker { display: none; }
+    details.files > summary::before { content: "▸ "; color: var(--fg-dim); }
+    details.files[open] > summary::before { content: "▾ "; }
+    details.files .inner { margin-top: 8px; max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; }
+
+    /* ===== FOOTER ===== */
+    footer.bottom {
+      margin-top: 80px; padding-top: 20px; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      color: var(--fg-dim); font-size: 12px; flex-wrap: wrap; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============================= HERO ============================= -->
+  <header class="hero">
+    <div class="crumb">{{T "scc 报告"}}</div>
+    <h1 class="title">{{ .RepoName }}</h1>
+    <p class="tagline">{{T "由 "}}<a href="https://github.com/boyter/scc">scc</a>{{T " 生成 - "}}Sloc, Cloc and Code.</p>
+    <div class="actions">
+      <button type="button" onclick="navigator.clipboard&amp;&amp;navigator.clipboard.writeText(location.href);this.textContent='{{T "已复制"}}';setTimeout(()=>this.textContent='{{T "复制链接"}}',1500)">{{T "复制链接"}}</button>
+      <button type="button" id="theme-toggle" title="{{T "主题切换：auto → light → dark"}}" aria-label="{{T "切换主题"}}">{{T "主题: "}}auto</button>
+    </div>
+  </header>
+
+  {{- /* ============================= 01 OVERVIEW ============================= */}}
+  <section>
+    <h2><span class="num">01</span> {{T "概览"}}</h2>
+    <p class="lede">{{T "工作树中全部源文件的汇总统计"}}{{ if or .Cocomo .Locomo }}{{T "，含成本估算"}}{{ end }}{{ if .ULOC }}{{T "，以及基于唯一代码行数（ULOC）的去重率"}}{{ end }}{{T "。"}}</p>
+
+    <div class="metrics">
+      <div class="metric"><div class="label">{{T "文件数"}}</div><div class="value">{{ comma .Totals.Files }}</div><div class="sub">{{ sliceLen .Summary }} {{T "种语言"}}</div></div>
+      <div class="metric"><div class="label">{{T "源代码行数"}}</div><div class="value">{{ comma .Totals.Code }}</div><div class="sub">{{T "代码行"}}</div></div>
+      <div class="metric"><div class="label">{{T "注释数"}}</div><div class="value">{{ comma .Totals.Comment }}</div><div class="sub">{{ pct .Totals.Comment .Totals.Lines }}</div></div>
+      <div class="metric"><div class="label">{{T "复杂度"}}</div><div class="value">{{ comma .Totals.Complexity }}</div><div class="sub">{{T "圈复杂度估算"}}</div></div>
+      {{- if .ULOC }}
+      <div class="metric"><div class="label">{{T "唯一代码行数"}}</div><div class="value">{{ commaInt .ULOC.Global }}</div><div class="sub">{{T "去重率"}} {{ pctFloat .ULOC.Dryness }}</div></div>
+      {{- end }}
+      <div class="metric"><div class="label">{{T "字节"}}</div><div class="value">{{ bytes .Totals.Bytes }}</div><div class="sub">{{T "磁盘占用"}}</div></div>
+    </div>
+
+    {{- if gt .Totals.Lines 0 }}
+    <div class="composition">
+      <div class="bar" aria-label="{{T "行构成："}}{{ pct .Totals.Code .Totals.Lines }}{{T " 代码，"}}{{ pct .Totals.Blank .Totals.Lines }}{{T " 空行，"}}{{ pct .Totals.Comment .Totals.Lines }}{{T " 注释"}}">
+        <span style="width: {{ printf "%.1f" (pctRaw .Totals.Code .Totals.Lines) }}%; background: var(--code);"></span>
+        <span style="width: {{ printf "%.1f" (pctRaw .Totals.Blank .Totals.Lines) }}%; background: var(--blank);"></span>
+        <span style="width: {{ printf "%.1f" (pctRaw .Totals.Comment .Totals.Lines) }}%; background: var(--comment);"></span>
+      </div>
+      <div class="legend">
+        <span><span class="sw" style="background: var(--code)"></span>{{T "代码"}} <strong>{{ pct .Totals.Code .Totals.Lines }}</strong></span>
+        <span><span class="sw" style="background: var(--blank)"></span>{{T "空行"}} <strong>{{ pct .Totals.Blank .Totals.Lines }}</strong></span>
+        <span><span class="sw" style="background: var(--comment)"></span>{{T "注释"}} <strong>{{ pct .Totals.Comment .Totals.Lines }}</strong></span>
+        <span style="margin-left: auto; color: var(--fg-dim);">{{ comma .Totals.Lines }} {{T "总行数"}}</span>
+      </div>
+    </div>
+    {{- end }}
+  </section>
+
+  {{- /* ============================= 02 LANGUAGES ============================= */}}
+  <section>
+    <h2><span class="num">02</span> {{T "语言明细"}} <span class="count">· {{ sliceLen .Summary }} {{T "种已识别"}}</span></h2>
+    <p class="lede">{{T "各语言的计数及其占总代码的份额。条形图显示代码占比；唯一代码行数（ULOC）指示有多少行是唯一的。"}}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>{{T "语言"}}</th>
+          <th class="num">{{T "文件数"}}</th>
+          <th class="num">{{T "代码"}}</th>
+          <th class="num">{{T "注释"}}</th>
+          <th class="num">{{T "空行"}}</th>
+          <th class="num">{{T "复杂度"}}</th>
+          <th class="num">{{T "唯一代码行数"}}</th>
+          <th class="ratio-cell">{{T "占比"}}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{- $totals := .Totals }}
+      {{- range .Summary }}
+        <tr>
+          <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ langColor .Name }};margin-right:6px;vertical-align:middle;"></span>{{ .Name }}</td>
+          <td class="num">{{ comma .Count }}</td>
+          <td class="num">{{ comma .Code }}</td>
+          <td class="num">{{ comma .Comment }}</td>
+          <td class="num">{{ comma .Blank }}</td>
+          <td class="num">{{ comma .Complexity }}</td>
+          <td class="num">{{ commaInt .ULOC }}</td>
+          <td class="ratio-cell"><span class="track"><span class="fill" style="width: {{ printf "%.1f" (pctRaw .Code $totals.Code) }}%;"></span></span></td>
+        </tr>
+      {{- end }}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>{{T "合计"}}</th>
+          <th class="num">{{ comma .Totals.Files }}</th>
+          <th class="num">{{ comma .Totals.Code }}</th>
+          <th class="num">{{ comma .Totals.Comment }}</th>
+          <th class="num">{{ comma .Totals.Blank }}</th>
+          <th class="num">{{ comma .Totals.Complexity }}</th>
+          <th class="num">{{ if .ULOC }}{{ commaInt .ULOC.Global }}{{ else }}-{{ end }}</th>
+          <th></th>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  {{- /* ============================= 03 LINE LENGTH ============================= */}}
+  {{- if .LineLength }}
+  <section>
+    <h2><span class="num">03</span> {{T "行长度"}}</h2>
+    <p class="lede">{{T "每行字符数在全部文件中的分桶分布。用于发现行数异常长的文件。"}}</p>
+    {{- $bars := histoBars .LineLength.Buckets 128 }}
+    <svg class="histo" viewBox="0 0 720 170" role="img" aria-label="{{T "行长度直方图"}}">
+      <line class="axis" x1="40" y1="140" x2="700" y2="140"/>
+      <g>
+        {{- range $bars }}
+        <rect x="{{ add 40 .X }}" y="{{ sub 140 .H }}" width="{{ .W }}" height="{{ .H }}"/>
+        {{- end }}
+      </g>
+      <g text-anchor="middle">
+        {{- range $bars }}
+        <text class="value" x="{{ add 40 (add .X (div .W 2)) }}" y="{{ sub 138 .H }}" dy="-2">{{ comma .Count }}</text>
+        <text class="label" x="{{ add 40 (add .X (div .W 2)) }}" y="158">{{ .Label }}</text>
+        {{- end }}
+      </g>
+    </svg>
+    <div style="display: flex; gap: 32px; margin-top: 14px; font-size: 13px; color: var(--fg-muted); flex-wrap: wrap;">
+      <div><span class="mono" style="color: var(--fg); font-weight: 600;">{{ printf "%.1f" .LineLength.Mean }}</span> {{T "均值"}}</div>
+      <div><span class="mono" style="color: var(--fg); font-weight: 600;">{{ commaInt .LineLength.Max }}</span> {{T "最长行（字符数）"}}</div>
+      {{- if .LineLength.Outliers }}
+      <div><span class="mono" style="color: var(--fg); font-weight: 600;">{{ sliceLen .LineLength.Outliers }}</span> {{T "个离群文件被跟踪"}}</div>
+      {{- end }}
+    </div>
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 04 HOTSPOTS ============================= */}}
+  {{- if .Hotspots }}
+  <section>
+    <h2><span class="num">04</span> {{T "热点"}} <span class="count">· {{T "前 "}}{{ sliceLen (firstN 12 .Hotspots.Records) }}{{T " / 共 "}}{{ .Hotspots.TotalRaw }}</span></h2>
+    <p class="lede">{{T "变更频率 × 复杂度最高的文件。得分高 = 改动频繁且难以理解，是重构或补充测试覆盖的首要目标。"}}</p>
+    <table>
+      <thead>
+        <tr><th>{{T "文件"}}</th><th class="num">{{T "得分"}}</th><th class="num">{{T "提交数"}}</th><th class="num">{{T "作者数"}}</th><th class="num">{{T "变更行数"}}</th><th class="num">{{T "复杂度"}}</th></tr>
+      </thead>
+      <tbody>
+      {{- range firstN 12 .Hotspots.Records }}
+        <tr>
+          <td class="mono">{{ .File }}</td>
+          <td class="num">{{ printf "%.1f" .Score }}</td>
+          <td class="num">{{ commaInt .Commits }}</td>
+          <td class="num">{{ commaInt .Authors }}</td>
+          <td class="num">{{ comma .LinesChanged }}</td>
+          <td class="num">{{ comma .Complexity }}</td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 05 COUPLING ============================= */}}
+  {{- if .Coupling }}
+  <section>
+    <h2><span class="num">05</span> {{T "变更耦合"}} <span class="count">· {{T "前 "}}{{ sliceLen (firstN 12 .Coupling.Pairs) }}{{T " / 共 "}}{{ .Coupling.TotalPairs }}</span></h2>
+    <p class="lede">{{T "在同一批提交中一起变更的文件对。高耦合 = git 强制存在而代码未表达的隐式依赖；改动一个通常意味着也要改动另一个。" | safeHTML}}</p>
+    <table>
+      <thead>
+        <tr><th>{{T "文件 A"}}</th><th>{{T "文件 B"}}</th><th class="num">{{T "共同提交"}}</th><th class="num">{{T "耦合度"}}</th></tr>
+      </thead>
+      <tbody>
+      {{- range firstN 12 .Coupling.Pairs }}
+        <tr>
+          <td class="mono">{{ .FileA }}</td>
+          <td class="mono">{{ .FileB }}</td>
+          <td class="num">{{ commaInt .Shared }}</td>
+          <td class="num">{{ printf "%.1f%%" .Degree }}</td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 06 AUTHORS ============================= */}}
+  {{- if .Authors }}
+  <section>
+    <h2><span class="num">06</span> {{T "代码作者"}} <span class="count">· {{ sliceLen .Authors.Rows }} {{T "位贡献者"}}</span></h2>
+    <p class="lede">
+      {{T "代码归属按分析窗口内的行级 git blame 测量。"}}
+      <span class="tag warn">Bus factor: {{ .Authors.BusFactor }}</span>
+      {{- if .Authors.BusAuthors }}{{T "；"}}{{ index .Authors.BusAuthors 0 }}{{T " 在窗口内拥有最多代码。"}}{{ end }}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>{{T "作者"}}</th>
+          <th class="num">{{T "代码"}}</th>
+          <th class="num">{{T "文件数"}}</th>
+          <th class="num">{{T "持有占比"}}</th>
+          <th class="num">{{T "窗口内"}}</th>
+          <th>{{T "最后提交"}}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{- range firstN 20 .Authors.Rows }}
+        <tr{{ if .Sentinel }} style="color: var(--fg-dim);"{{ end }}>
+          <td>{{ .Name }}{{ if .Email }} <span style="color: var(--fg-dim);" class="mono">&lt;{{ .Email }}&gt;</span>{{ end }}</td>
+          <td class="num">{{ if .Sentinel }}-{{ else }}{{ comma .Code }}{{ end }}</td>
+          <td class="num">{{ if .Sentinel }}-{{ else }}{{ commaInt .Files }}{{ end }}</td>
+          <td class="num">{{ if .Sentinel }}-{{ else }}{{ printf "%.1f%%" .OwnsPercent }}{{ end }}</td>
+          <td class="num">{{ if .Sentinel }}-{{ else }}{{ printf "%.1f%%" .InWindowPercent }}{{ end }}</td>
+          <td class="mono">{{ if .Sentinel }}{{T "窗口之前"}}{{ else }}{{ .LastCommit.Format "2006-01-02" }}{{ end }}</td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 07 TIMELINE ============================= */}}
+  {{- if or .LanguageTimeline .AuthorTimeline }}
+  <section>
+    <h2><span class="num">07</span> {{T "时间轴"}}{{ if .LanguageTimeline }} <span class="count">· {{ .LanguageTimeline.Buckets }} {{T "个时间桶"}}</span>{{ end }}</h2>
+    <p class="lede">{{T "分析历史窗口内按语言的代码行数。按语言和按作者展示迷你趋势线。"}}</p>
+
+    {{- if .LanguageTimeline }}
+    <table style="margin-top: 18px;">
+      <thead><tr><th>{{T "语言"}}</th><th class="num">{{T "起始"}}</th><th class="num">{{T "当前"}}</th><th class="num">Δ</th><th>{{T "轨迹"}}</th></tr></thead>
+      <tbody>
+      {{- range firstN 12 .LanguageTimeline.Rows }}
+        <tr>
+          <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ langColor .Language }};margin-right:6px;vertical-align:middle;"></span>{{ .Language }}</td>
+          <td class="num">{{ comma .StartingLines }}</td>
+          <td class="num">{{ comma .CodeNow }}</td>
+          <td class="num" style="color: {{ deltaColor .Change }}">{{ deltaSign .Change }}{{ comma .Change }}</td>
+          <td><svg class="spark" viewBox="0 0 140 22"><path class="fill" d="{{ sparklineFill64 .Trajectory 140 22 }}"/><path d="{{ sparklinePath64 .Trajectory 140 22 }}"/></svg></td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- end }}
+
+    {{- if .AuthorTimeline }}
+    <h3 style="font-size: 14px; font-weight: 600; margin: 28px 0 8px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em;">{{T "作者活跃度"}}</h3>
+    <table>
+      <thead><tr><th>{{T "作者"}}</th><th class="num">{{T "提交数"}}</th><th class="num">{{T "Δ 代码"}}</th><th>{{T "活跃度"}}</th></tr></thead>
+      <tbody>
+      {{- range firstN 12 .AuthorTimeline.Rows }}
+        <tr>
+          <td>{{ .Name }}</td>
+          <td class="num">{{ commaInt .TotalCommits }}</td>
+          <td class="num" style="color: {{ deltaColor .CodeDelta }}">{{ deltaSign .CodeDelta }}{{ comma .CodeDelta }}</td>
+          <td>
+            <svg class="spark" viewBox="0 0 200 22"><path d="{{ sparklinePath64 (authorActivity .Series) 200 22 }}"/></svg>
+          </td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- end }}
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 08 COST ============================= */}}
+  {{- if or .Cocomo .Locomo }}
+  <section>
+    <h2><span class="num">08</span> {{T "成本估算"}}</h2>
+    <p class="lede">{{T "两种代码库估值方式：人工构建成本（COCOMO，Boehm 1981）"}}{{ if .Locomo }}{{T "，以及机器重建成本（LOCOMO，LLM 再生成模型）"}}{{ end }}{{T "。"}}</p>
+
+    {{- if .Cocomo }}
+    <h3 class="submodel">COCOMO <span class="submodel-meaning">{{T "：若由开发团队从零编写所需的成本"}}</span></h3>
+    <div class="metrics">
+      <div class="metric"><div class="label">{{T "工作量"}}</div><div class="value">{{ printf "%.1f" .Cocomo.EstimatedEffort }}</div><div class="sub">{{T "人月 · "}}{{ .Cocomo.ProjectType }}</div></div>
+      <div class="metric"><div class="label">{{T "开发成本"}}</div><div class="value">{{ .Cocomo.CurrencySymbol }}{{ printf "%.0f" .Cocomo.EstimatedCost }}</div><div class="sub">{{T "平均 "}}{{ .Cocomo.CurrencySymbol }}{{ comma .Cocomo.AverageWage }} · ×{{ printf "%.1f" .Cocomo.Overhead }} {{T "开销系数"}}</div></div>
+      <div class="metric"><div class="label">{{T "工期"}}</div><div class="value">{{ printf "%.1f" .Cocomo.ScheduleMonths }} {{T "个月"}}</div><div class="sub">≈ {{ printf "%.1f" .Cocomo.PeopleRequired }} {{T "名开发人员并行"}}</div></div>
+    </div>
+    {{- end }}
+
+    {{- if .Locomo }}
+    <h3 class="submodel">LOCOMO <span class="submodel-meaning">{{T "：用 LLM 再生成并评审输出所需的成本"}}</span></h3>
+    <div class="metrics">
+      <div class="metric"><div class="label">{{T "再生成 token 数"}}</div><div class="value">{{ bytes (intCast .Locomo.OutputTokens) }}</div><div class="sub">{{T "输出（输入 + 输出：" | safeHTML}}{{ bytes (intCast .Locomo.InputTokens) }}{{T "）"}}</div></div>
+      <div class="metric"><div class="label">{{T "再生成耗时"}}</div><div class="value">{{ printf "%.1f" (divFloat .Locomo.GenerationSeconds 60) }} {{T "分钟"}}</div><div class="sub">{{T "按典型流式速率"}}</div></div>
+      <div class="metric"><div class="label">{{T "人工评审"}}</div><div class="value">{{ printf "%.0f" .Locomo.ReviewHours }} {{T "小时"}}</div><div class="sub">{{T "再生成之后"}}</div></div>
+    </div>
+    {{- end }}
+  </section>
+  {{- end }}
+
+  {{- /* ============================= 09 NOTABLE FILES ============================= */}}
+  {{- if .Files }}
+  <section>
+    <h2><span class="num">09</span> {{T "重点文件"}}</h2>
+    <p class="lede">{{T "全树的逐文件明细（"}}{{ sliceLen .Files }}{{T " 个文件）。按行数降序排序；默认显示前十个，展开可查看其余。"}}</p>
+    {{- $sorted := filesSorted .Files }}
+    <table>
+      <thead><tr><th>{{T "文件"}}</th><th class="num">{{T "行数"}}</th><th class="num">{{T "代码"}}</th><th class="num">{{T "注释"}}</th><th class="num">{{T "复杂度"}}</th><th class="num">{{T "字节"}}</th><th class="num">{{T "唯一代码行数"}}</th></tr></thead>
+      <tbody>
+      {{- range firstN 10 $sorted }}
+        <tr>
+          <td class="mono">{{ .Location }}</td>
+          <td class="num">{{ comma .Lines }}</td>
+          <td class="num">{{ comma .Code }}</td>
+          <td class="num">{{ comma .Comment }}</td>
+          <td class="num">{{ comma .Complexity }}</td>
+          <td class="num">{{ comma .Bytes }}</td>
+          <td class="num">{{ commaInt .Uloc }}</td>
+        </tr>
+      {{- end }}
+      </tbody>
+    </table>
+    {{- if gt (sliceLen $sorted) 10 }}
+    <details class="files"><summary>{{T "显示全部 "}}{{ sliceLen $sorted }} {{T "个文件"}}</summary><div class="inner">
+      <table>
+        <thead><tr><th>{{T "文件"}}</th><th class="num">{{T "行数"}}</th><th class="num">{{T "代码"}}</th><th class="num">{{T "字节"}}</th></tr></thead>
+        <tbody>
+        {{- range $i, $f := $sorted }}{{ if ge $i 10 }}
+          <tr><td class="mono">{{ $f.Location }}</td><td class="num">{{ comma $f.Lines }}</td><td class="num">{{ comma $f.Code }}</td><td class="num">{{ comma $f.Bytes }}</td></tr>
+        {{- end }}{{- end }}
+        </tbody>
+      </table>
+    </div></details>
+    {{- end }}
+  </section>
+  {{- end }}
+
+  {{- if not .GitAvailable }}
+  <section>
+    <h2><span class="num">~~</span> {{T "Git 历史"}}</h2>
+    <p class="lede" style="color: var(--fg-dim);">{{T "不是 git 仓库。热点、变更耦合、作者与时间轴需要 git 历史。"}}</p>
+  </section>
+  {{- end }}
+
+  <footer class="bottom">
+    <div>{{T "由 "}}<a href="https://github.com/boyter/scc">scc</a> v{{ .SccVersion }} · {{ .GeneratedAt.Format "2006-01-02 15:04 UTC" }} · {{T "分析耗时 "}}{{ printf "%.1fs" (durationSeconds .Duration) }}</div>
+    <div>{{T "单文件自包含 HTML · 便于查看源码"}}</div>
+  </footer>
+
+</div>
+
+<script>
+  (function() {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    var html = document.documentElement;
+    var label = function() {
+      var t = html.getAttribute('data-theme');
+      btn.textContent = '{{T "主题: "}}' + (t || 'auto');
+    };
+    label();
+    btn.addEventListener('click', function() {
+      var current = html.getAttribute('data-theme');
+      var next = current === null ? 'light' : (current === 'light' ? 'dark' : null);
+      if (next === null) {
+        html.removeAttribute('data-theme');
+        try { localStorage.removeItem('scc-theme'); } catch (e) {}
+      } else {
+        html.setAttribute('data-theme', next);
+        try { localStorage.setItem('scc-theme', next); } catch (e) {}
+      }
+      label();
+    });
+  })();
+</script>
+</body>
+</html>
